@@ -65,13 +65,72 @@ router.post('/register', async (req:Request, res:Response) => {
     }
   });
 
+  
 
 
+  router.post('/forgot-password', async (req: Request, res: Response) => {
+    const { email } = req.body;
+  
+    try {
+      const user = await prisma.user.findUnique({
+        where: { email },
+      });
+  
+      if (!user) {
+        return res.status(404).json({ message: 'User not found.' });
+      }
+      const resetToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, {
+        expiresIn: '1h',
+      });
+      await prisma.passwordResetToken.create({
+        data: {
+          token: resetToken,
+          expiresAt: new Date(Date.now() + 3600000),
+          userId: user.id,
+        },
+      });
+      res.json({ message: 'Password reset initiated. Check your email for instructions.', resetToken });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: 'Internal Server Error.' });
+    }
+  });
 
 
+  router.post('/reset-password/:token', async (req: Request, res: Response) => {
+    const { token } = req.params;
+    const { newPassword } = req.body;
+  
+    try {
+      const resetToken = await prisma.passwordResetToken.findUnique({
+        where: { token },
+      });
+  
+      if (!resetToken || resetToken.expiresAt < new Date()) {
+        return res.status(400).json({ message: 'Invalid or expired token.' });
+      }
+  
+      
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await prisma.user.update({
+        where: { id: resetToken.userId },
+        data: { password: hashedPassword },
+      });
+      try{await prisma.passwordResetToken.delete({
+        where: { token },
+      });}catch(error){
+        res.status(400).json({message: 'Token Expired'})
+      }
+      
+  
+      res.json({ message: 'Password reset successful.' });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: 'Internal Server Error.' });
+    }
+  });
 
-
-  router.get('/users',verifyToken, async (req:Request, res:Response) => {
+  router.get('/users', verifyToken, async (req:Request, res:Response) => {
     try {
       const users = await prisma.user.findMany();
       res.json(users);
@@ -80,10 +139,6 @@ router.post('/register', async (req:Request, res:Response) => {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
-
-
-
-  
 
   router.put('/updateuser', async (req:Request, res:Response) =>{
     try {
